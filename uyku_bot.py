@@ -1,9 +1,12 @@
 import sqlite3
+import os
 from datetime import datetime
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = "8624999216:AAFWUnjGzueCokzJAIGzu1pUf5kGh13MJYA"
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 conn = sqlite3.connect("uyku.db", check_same_thread=False)
 cursor = conn.cursor()
