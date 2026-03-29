@@ -4,9 +4,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from groq import Groq
 
-load_dotenv()
+load_dotenv()  # ÖNCE BU
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))  # SONRA BU
 
 conn = sqlite3.connect("uyku.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -105,6 +108,65 @@ async def rapor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(mesaj)
 
+async def analiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT tarih, yatis, kalkis, sure, kahve, ruh, egzersiz FROM kayitlar ORDER BY id DESC LIMIT 7")
+    kayitlar = cursor.fetchall()
+    
+    if not kayitlar:
+        await update.message.reply_text("Henüz yeterli veri yok!")
+        return
+    
+    veri_metni = ""
+    for k in kayitlar:
+        veri_metni += f"Tarih: {k[0]}, Yatış: {k[1]}, Kalkış: {k[2]}, Uyku: {k[3]} saat, Kahve: {k[4]} fincan, Ruh hali: {k[5]}/10, Egzersiz: {k[6]}\n"
+    
+    prompt = f"""
+    Aşağıdaki uyku ve yaşam tarzı verileri bir kişiye ait. 
+    Türkçe olarak analiz et, önerilerde bulun, dikkat çeken kalıpları belirt.
+    Samimi ve motive edici bir dil kullan, 5-7 cümle yeterli.
+    Sen bir uyku ve sağlık koçusun. Aşağıdaki verileri analiz et.
+    SADECE TÜRKÇE yaz, kesinlikle başka dil kullanma.
+    
+    Veriler:
+    {veri_metni}
+    """
+    sureler = [k[3] for k in kayitlar if k[3]]
+    kahveler = [k[4] for k in kayitlar if k[4]]
+    ruhlar = [k[5] for k in kayitlar if k[5]]
+    
+    yanit = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": "Sen bir Türk uyku ve sağlık koçusun. "
+                "TÜRKÇE KARAKTER KULLAN, HER ŞEY TÜRKÇE OLSUN."
+                "Her zaman sadece Türkçe konuş. TÜRKÇE karakterler dışında başka bir karakter kullanma. "
+                "Metnin tamamen TÜRKÇE olmalı."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+    await update.message.reply_text(f"🧠 AI Analizi:\n\n{yanit.choices[0].message.content}")
+    
+    mesaj = "📊 Son 7 Günün Raporu:\n\n"
+
+    if sureler:
+        mesaj += f"😴 Ortalama uyku: {round(sum(sureler)/len(sureler), 1)} saat\n"
+        mesaj += f"🏆 En iyi gece: {max(sureler)} saat\n"
+        mesaj += f"😞 En kötü gece: {min(sureler)} saat\n"
+    if kahveler:
+        mesaj += f"☕ Ortalama kahve: {round(sum(kahveler)/len(kahveler), 1)} fincan\n"
+    if ruhlar:
+        mesaj += f"😊 Ortalama ruh hali: {round(sum(ruhlar)/len(ruhlar), 1)}/10\n"
+
+    await update.message.reply_text(mesaj)
+    
+    
+
 async def yardim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mesaj = """
 🤖 Uyku Takip Botu Komutları:
@@ -129,6 +191,6 @@ app.add_handler(CommandHandler("ruh", ruh))
 app.add_handler(CommandHandler("egzersiz", egzersiz))
 app.add_handler(CommandHandler("rapor", rapor))
 app.add_handler(CommandHandler("yardim", yardim))
-
+app.add_handler(CommandHandler("analiz", analiz))
 print("🤖 Uyku botu başladı...")
 app.run_polling()
